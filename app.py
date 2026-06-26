@@ -17,6 +17,36 @@ def extract_text_from_pdf(pdf_file):
         st.error(f"Error reading PDF: {e}")
     return text
 
+def parse_jd_projects(jd_text):
+    """
+    Parses the JD text to extract individual projects based on the pattern 'Project X Title:'.
+    If no projects are found, returns the entire text as a single generic project.
+    """
+    projects = []
+    # Find all project titles
+    pattern = r'Project \d+ Title:\s*(.*)'
+    titles = re.findall(pattern, jd_text)
+    
+    # If no specific projects are found, treat the whole JD as one project
+    if not titles:
+        return [{'title': 'General Role Description', 'text': jd_text}]
+        
+    # Split text by the project title pattern
+    parts = re.split(r'Project \d+ Title:\s*.*\n', jd_text)
+    
+    for i, title in enumerate(titles):
+        body = parts[i+1]
+        # Clean up any trailing preamble from the next section (like 'Role: Internship')
+        if 'Role: ' in body:
+            body = body.split('Role: ')[0]
+            
+        projects.append({
+            'title': title.strip(),
+            'text': title.strip() + "\n" + body.strip()
+        })
+        
+    return projects
+
 def clean_text(text):
     # Remove non-alphanumeric characters and convert to lowercase
     text = re.sub(r'[^a-zA-Z0-9\s]', ' ', text)
@@ -28,7 +58,11 @@ def calculate_similarity(resume_text, jd_text):
     vectorizer = TfidfVectorizer(stop_words='english', use_idf=False)
     
     # Fit the vectorizer ONLY on the Job Description to create a vocabulary of "required keywords"
-    vectorizer.fit([jd_text])
+    try:
+        vectorizer.fit([jd_text])
+    except ValueError:
+        # Happens if jd_text has no valid english words
+        return 0.0, None
     
     # Transform both the Resume and the JD into this JD-specific vector space
     jd_vector = vectorizer.transform([jd_text])
@@ -48,69 +82,85 @@ def main():
     
     st.title("ResumeIQ: NLP-Powered Resume Analyzer")
     st.markdown("""
-    Upload your resume (PDF) and paste a Job Description (JD) to see how well they match.
-    This tool uses **TF-IDF vectorization** and **cosine similarity** to calculate a keyword match score.
+    Upload your resume (PDF) and a Job Description (PDF) to see how well they match.
+    The analyzer will automatically detect multiple projects within the JD and score your relevance for each!
     """)
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("1. Upload Resume")
-        uploaded_file = st.file_uploader("Upload your resume in PDF format", type=["pdf"])
+        resume_file = st.file_uploader("Upload your resume (PDF)", type=["pdf"], key="resume")
         resume_text = ""
-        if uploaded_file is not None:
-            with st.spinner("Extracting text from PDF..."):
-                resume_text = extract_text_from_pdf(uploaded_file)
-            st.success("Resume uploaded and text extracted!")
-            with st.expander("View Extracted Resume Text"):
-                st.text(resume_text)
+        if resume_file is not None:
+            with st.spinner("Extracting text from Resume..."):
+                resume_text = extract_text_from_pdf(resume_file)
+            st.success("Resume uploaded successfully!")
                 
     with col2:
-        st.subheader("2. Job Description")
-        jd_text = st.text_area("Paste the Job Description here", height=250)
+        st.subheader("2. Upload Job Description")
+        jd_file = st.file_uploader("Upload Job Description (PDF)", type=["pdf"], key="jd")
+        jd_text = ""
+        if jd_file is not None:
+            with st.spinner("Extracting text from JD..."):
+                jd_text = extract_text_from_pdf(jd_file)
+            st.success("JD uploaded successfully!")
         
     st.markdown("---")
     
-    if st.button("Analyze Resume", type="primary"):
+    if st.button("Analyze Resume Relevance", type="primary"):
         if not resume_text:
             st.error("Please upload a resume.")
         elif not jd_text:
-            st.error("Please paste a job description.")
+            st.error("Please upload a job description.")
         else:
-            with st.spinner("Analyzing with TF-IDF..."):
+            with st.spinner("Parsing projects and analyzing with TF-IDF..."):
+                projects = parse_jd_projects(jd_text)
                 clean_resume = clean_text(resume_text)
-                clean_jd = clean_text(jd_text)
                 
-                score, vectorizer = calculate_similarity(clean_resume, clean_jd)
+                st.subheader(f"Analysis Results ({len(projects)} Projects Found)")
                 
-                st.subheader("Analysis Results")
+                # Create a grid layout for project cards
+                cols = st.columns(min(len(projects), 2))
                 
-                # Display Score
-                score_percentage = round(score * 100, 2)
-                st.metric(label="Resume Match Score", value=f"{score_percentage}%")
-                
-                if score_percentage >= 75:
-                    st.success("Excellent match! Your resume strongly aligns with this JD.")
-                elif score_percentage >= 50:
-                    st.warning("Good match, but consider adding more keywords from the JD to your resume.")
-                else:
-                    st.error("Low match. You may need to significantly tailor your resume for this role.")
+                for idx, project in enumerate(projects):
+                    col = cols[idx % 2]
                     
-                # Show top keywords from JD
-                try:
-                    feature_names = vectorizer.get_feature_names_out()
-                    jd_vector = vectorizer.transform([clean_jd])
-                    
-                    # Get top keywords by TF-IDF score
-                    sorted_items = np.argsort(jd_vector.toarray()[0])[::-1]
-                    top_keywords = [feature_names[i] for i in sorted_items[:15] if jd_vector.toarray()[0][i] > 0]
-                    
-                    st.write("**Top Keywords in Job Description (by TF-IDF):**")
-                    st.write(", ".join(top_keywords))
-                    
-                    st.info("Tip: Ensure your resume includes these keywords if you have the relevant experience.")
-                except Exception as e:
-                    pass
+                    with col:
+                        st.markdown(f"### 📌 {project['title']}")
+                        clean_jd = clean_text(project['text'])
+                        
+                        score, vectorizer = calculate_similarity(clean_resume, clean_jd)
+                        
+                        if vectorizer is None:
+                            st.error("Not enough text in this project to analyze.")
+                            continue
+                            
+                        # Display Score
+                        score_percentage = round(score * 100, 2)
+                        st.metric(label="Relevance Score", value=f"{score_percentage}%")
+                        
+                        if score_percentage >= 75:
+                            st.success("Excellent match!")
+                        elif score_percentage >= 50:
+                            st.warning("Good match, but consider adding keywords.")
+                        else:
+                            st.error("Low match.")
+                            
+                        # Show top keywords from JD
+                        try:
+                            feature_names = vectorizer.get_feature_names_out()
+                            jd_vector = vectorizer.transform([clean_jd])
+                            
+                            # Get top keywords by TF-IDF score
+                            sorted_items = np.argsort(jd_vector.toarray()[0])[::-1]
+                            top_keywords = [feature_names[i] for i in sorted_items[:10] if jd_vector.toarray()[0][i] > 0]
+                            
+                            st.write("**Key Project Requirements:**")
+                            st.write(", ".join(top_keywords))
+                        except Exception as e:
+                            pass
+                        st.markdown("---")
 
 if __name__ == "__main__":
     main()
