@@ -1,0 +1,10 @@
+# Ignore data directory containing personal resumes/JDs
+data/
+*.pdf
+
+# Python standard ignores
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/

@@ -23,16 +23,25 @@ def clean_text(text):
     return text.lower()
 
 def calculate_similarity(resume_text, jd_text):
-    # Create TF-IDF Vectorizer with english stop words
-    vectorizer = TfidfVectorizer(stop_words='english')
+    # Create TF-IDF Vectorizer with english stop words and disable IDF
+    # Disabling IDF prevents the algorithm from mathematically penalizing words that appear in both documents
+    vectorizer = TfidfVectorizer(stop_words='english', use_idf=False)
     
-    # Fit and transform the texts
-    tfidf_matrix = vectorizer.fit_transform([resume_text, jd_text])
+    # Fit the vectorizer ONLY on the Job Description to create a vocabulary of "required keywords"
+    vectorizer.fit([jd_text])
     
-    # Calculate Cosine Similarity
-    similarity_score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+    # Transform both the Resume and the JD into this JD-specific vector space
+    jd_vector = vectorizer.transform([jd_text])
+    resume_vector = vectorizer.transform([resume_text])
     
-    return similarity_score, vectorizer
+    # Calculate raw Cosine Similarity
+    raw_score = cosine_similarity(resume_vector, jd_vector)[0][0]
+    
+    # Scale the raw score. Raw cosine similarity of sparse text rarely exceeds 0.3-0.4 for a great match.
+    # We multiply by 3.5 to map the realistic range [0, ~0.28] closer to [0, 1.0].
+    scaled_score = min(raw_score * 3.5, 1.0)
+    
+    return scaled_score, vectorizer
 
 def main():
     st.set_page_config(page_title="ResumeIQ Analyzer", page_icon="📄", layout="wide")
