@@ -23,16 +23,16 @@ def parse_jd_projects(jd_text):
     If no projects are found, returns the entire text as a single generic project.
     """
     projects = []
-    # Find all project titles
-    pattern = r'Project \d+ Title:\s*(.*)'
+    # Find all project titles including the 'Project X' part
+    pattern = r'(Project \d+ Title:\s*.*)'
     titles = re.findall(pattern, jd_text)
     
     # If no specific projects are found, treat the whole JD as one project
     if not titles:
         return [{'title': 'General Role Description', 'text': jd_text}]
         
-    # Split text by the project title pattern
-    parts = re.split(r'Project \d+ Title:\s*.*\n', jd_text)
+    # Split text by the project title pattern (accounting for possible newlines)
+    parts = re.split(r'Project \d+ Title:\s*.*\n?', jd_text)
     
     for i, title in enumerate(titles):
         body = parts[i+1]
@@ -72,8 +72,8 @@ def calculate_similarity(resume_text, jd_text):
     raw_score = cosine_similarity(resume_vector, jd_vector)[0][0]
     
     # Scale the raw score. Raw cosine similarity of sparse text rarely exceeds 0.3-0.4 for a great match.
-    # We multiply by 3.5 to map the realistic range [0, ~0.28] closer to [0, 1.0].
-    scaled_score = min(raw_score * 3.5, 1.0)
+    # We multiply by 2.8 to map the realistic range [0, ~0.35] closer to [0, 1.0]. This prevents it from maxing out too easily.
+    scaled_score = min(raw_score * 2.8, 1.0)
     
     return scaled_score, vectorizer
 
